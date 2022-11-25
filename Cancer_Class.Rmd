@@ -1,0 +1,14 @@
+---
+title: "STATS 604 - Benjamin Osafo Agyare"
+output: html_document
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#%%%%%%%%%%%%%%%%%%%%%%%%%%% LOAD LIBRARIES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+suppressMessages(library(tidyverse))
+```
+
+
