@@ -17,7 +17,7 @@ suppressMessages(library(glmnet))
 
 ```{r read_data}
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% READ DATA %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-dat <- fread(file = "20221122_test.data.csv") %>%
+dat <- fread(file = "../../Project_data/20221122_test.data.csv") %>%
               mutate(study_source = as.factor(study_source),
                      tissue_source = as.factor(tissue_source),
                      met_location = as.factor(met_location))
