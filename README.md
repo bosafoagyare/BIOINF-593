@@ -10,7 +10,7 @@ The slides have additional details about the datasets that are used and a graphi
 Dropbox contain raw data downloaded from various sources, and also the modified/combined datasets.
 
 
-##########____________OVERALL PROJECT RATIONALE________________###############
+# OVERALL PROJECT RATIONALE        
 
 Metastasis from primary tumours are bad.
 difficult to tell if a tumour has metastasized or not
@@ -19,7 +19,7 @@ we want to find a method to predict:
   - can we predict whether there is hidden metastasis event?
 
 
-###########____________OVERALL PROJECT WORKFLOW/METHODS________________###############
+# OVERALL PROJECT WORKFLOW/METHODS       
 
 - download dataset from various studies
   - normalize data by TPM or sth
