@@ -1,5 +1,5 @@
 ---
-title: "STATS 604 - Benjamin Osafo Agyare"
+title: ""
 output: html_document
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 ---
@@ -9,6 +9,54 @@ knitr::opts_chunk$set(echo = TRUE)
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% LOAD LIBRARIES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 suppressMessages(library(tidyverse))
+suppressMessages(library(data.table))
+suppressMessages(library(e1071))
+suppressMessages(library(glmnet))
 ```
+
+
+```{r read_data}
+#%%%%%%%%%%%%%%%%%%%%%%%%%%% READ DATA %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+dat <- fread(file = "20221122_test.data.csv") %>%
+              mutate(study_source = as.factor(study_source),
+                     tissue_source = as.factor(tissue_source),
+                     met_location = as.factor(met_location))
+```
+
+
+```{r data_wrangling}
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%% DATA WRANGLING %%%%%%%%%%%%%%%%%%%%%%
+slice_dat <- dat[1:20, 1:10]
+view(slice_dat)
+slice_dat %>% str
+```
+
+
+```{r EDA}
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%% EDA %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+```
+
+
+```{r modeling_1}
+#%%%%%%%%%%%%%%%%%%%%%%%%%%% MODEL 1 (E-NET) %%%%%%%%%%%%%%%%%%%%%%
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
