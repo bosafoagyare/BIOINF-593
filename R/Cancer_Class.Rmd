@@ -12,6 +12,16 @@ suppressMessages(library(tidyverse))
 suppressMessages(library(data.table))
 suppressMessages(library(e1071))
 suppressMessages(library(glmnet))
+suppressMessages(library(doMC))
+#suppressMessages()
+options(expressions = 5e5)
+
+#------------------------ Cluster
+cores <- detectCores()
+registerDoMC(cores = cores-1)
+
+#------------------------ Trace progress for E-NET
+glmnet.control(itrace = 1)
 ```
 
 
@@ -20,15 +30,77 @@ suppressMessages(library(glmnet))
 dat <- fread(file = "../../Project_data/20221122_test.data.csv") %>%
               mutate(study_source = as.factor(study_source),
                      tissue_source = as.factor(tissue_source),
-                     met_location = as.factor(met_location))
+                     met_location = as.factor(met_location),
+                     has_met = as.factor(ifelse(met_location == "None", "No", "Yes"))
+                     )
 ```
 
 
 ```{r data_wrangling}
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%% DATA WRANGLING %%%%%%%%%%%%%%%%%%%%%%
-slice_dat <- dat[1:20, 1:10]
-view(slice_dat)
-slice_dat %>% str
+#slice_dat <- dat[1:20, 1:10]
+#view(slice_dat)
+#slice_dat %>% str
+
+
+#--------------------------------- Pre-Processing ----------------------
+# Set aside variables not yet needed
+cancer_dat <- dat %>%
+               filter(!is.na(tissue_source) & !is.na(met_location)) %>%
+               dplyr::select(-c(V1, study_source)) #%>%
+              #mutate(id = row_number(), .before = names(.)[1])
+
+#xx <- makeX(cancer_dat[, 1:10000], na.impute = TRUE, sparse = TRUE)
+               
+
+
+# Create training (70%) and test (30%) sets for the data weighted by tissue source.
+# Use set.seed for reproducibility
+set.seed(123)
+split <- rsample::initial_split(cancer_dat, prop = .7, strata = "tissue_source")
+train <- rsample::training(split)
+test  <- rsample::testing(split)
+
+# Create & standardize feature sets based on training parameters
+# training features
+train_x <- train %>% dplyr::select(-c(tissue_source, met_location, has_met))
+mean    <- colMeans(train_x)
+std     <- apply(train_x, 2, sd)
+train_x <- scale(train_x, center = mean, scale = std)
+train_y <- train %>% .[["tissue_source"]]
+
+# testing features
+test_x <- test %>% dplyr::select(-c(tissue_source, met_location, has_met))
+test_x <- scale(test_x, center = mean, scale = std)
+test_y <- test %>% .[["tissue_source"]]
+
+
+# helper function to filter out low variance genes
+uvar <- function(x, means = FALSE) {
+  # if means = TRUE, the means and variances are returned, 
+  # otherwise just the variances
+  m <- colMeans(x)
+  n <- nrow(x)
+  x <- x - outer(rep(1,n),m)
+  v <- colSums(x^2) / (n - 1)
+  if (means) list(mean = m, var = v) else v
+}
+
+vfilter <- function(q = 0.3, ...) {
+  function(x,...) {
+    v <- uvar(x)
+    which(v < quantile(v, q, na.rm = TRUE))
+  }
+}
+
+
+#-------------------------------- MISSINGNESS
+response_nas <- filter(dat, is.na(tissue_source) | is.na(met_location))
+nas    <- sapply(train_x, function(x) sum(is.na(x)))
+na_col <- apply(train_x, 2, function(x) anyNA(x))
+na_col_id <- which(na_col)
+#sum(nas)
+#nas
 ```
 
 
@@ -39,9 +111,142 @@ slice_dat %>% str
 
 ```{r modeling_1}
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% MODEL 1 (E-NET) %%%%%%%%%%%%%%%%%%%%%%
+foldid <- sample(rep(1:10, length.out = length(train_y)))
+
+#-------------------- Model 1
+cvfit.filt1 <- cv.glmnet(x = train_x,
+                         y = train_y,
+                         family = "multinomial",
+                         foldid = foldid, 
+                         standardize = FALSE,
+                         parallel = TRUE,
+                         alpha = 0
+                         )
+#-------------------- Model 2
+cvfit.filt2 <- cv.glmnet(x = train_x,
+                         y = train_y,
+                         family = "multinomial",
+                         foldid = foldid, 
+                         exclude = vfilter(q = 0.3),
+                         standardize = FALSE,
+                         parallel = TRUE,
+                         alpha = 0
+                         )
+
+# #-------------------- Model 3
+# cvfit.filt3 <- cv.glmnet(x = train_x[, -c(na_col_id)],
+#                          y = train_y,
+#                          family = "multinomial",
+#                          foldid = foldid, 
+#                          standardize = FALSE
+#                          )
+# 
+# #-------------------- Model 4
+# cvfit.filt4 <- cv.glmnet(x = train_x[, -c(na_col_id)],
+#                          y = train_y,
+#                          family = "multinomial",
+#                          foldid = foldid, 
+#                          exclude = vfilter(q = 0.3),
+#                          standardize = FALSE
+#                          )
+
+
+#---------------------- Performance
+assess.glmnet(cvfit.filt1, newx = test_x, newy = test_y)$class
+assess.glmnet(cvfit.filt2, newx = test_x, newy = test_y)$class
+assess.glmnet(cvfit.filt3, newx = test_x, newy = test_y)$class
+
+confusion.glmnet(cvfit.filt1, newx = test_x, newy = test_y)
+confusion.glmnet(cvfit.filt2, newx = test_x, newy = test_y)
+#confusion.glmnet(cvfit.filt3, newx = test_x[, -c(na_col_id)], newy = test_y)
+#confusion.glmnet(cvfit.filt4, newx = test_x[, -c(na_col_id)], newy = test_y)
+
+#-------------------- Prediction
+test_y_hat  <- predict(cvfit.filt1, newx = test_x, type = "class", s = "lambda.min")
+train_y_hat <- predict(cvfit.filt1, newx = train_x, type = "class", s = "lambda.min")
 ```
 
 
+
+```{r modeling_2}
+#%%%%%%%%%%%%%%%%%%%%%%%%%%% MODEL 2 (E-NET) %%%%%%%%%%%%%%%%%%%%%%
+
+#--------------------- Pipeline for train-test data for metastasis
+train_x2 <- makeX(data.frame(tissue_source = train_y_hat)) %>%
+                      bind_cols(train_x)%>%
+                      data.matrix()
+train_x2_names <- colnames(train_x2)  
+
+train_y2 <- train %>% .[["has_met"]]
+
+
+test_x2 <- makeX(data.frame(tissue_source = test_y_hat)) %>%
+                      bind_cols(test_x) %>%
+                      data.matrix()
+test_y2 <- test %>% .[["has_met"]]
+
+
+
+foldid <- sample(rep(1:10, length.out = length(train_y2))) 
+
+#-------------------- Model 1
+cvfit.mod_set2 <- cv.glmnet(x = train_x2,
+                            y = train_y2,
+                            family = "binomial",
+                            foldid = foldid, 
+                            standardize = FALSE,
+                            parallel = TRUE,
+                            alpha = 1
+                         )
+
+#---------------------- Performance
+assess.glmnet(cvfit.mod_set2, newx = test_x2, newy = test_y2)$class
+
+confusion.glmnet(cvfit.mod_set2, newx = test_x2, newy = test_y2)
+
+#-------------------- Prediction
+test_y_hat_2 <- predict(cvfit.mod_set2, newx = test_x2, type = "class", s = "lambda.min")
+```
+
+
+
+```{r grand_err}
+#%%%%%%%%%%%%%%%%%%%%%%%%%%% GRAND ERROR %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+acc_dat <- data.frame(y1 = test_y,
+                      y1_hat = as.factor(test_y_hat),
+                      y2 = test_y2,
+                      y2_hat = as.factor(test_y_hat_2)) %>%
+           mutate(accuracy = factor(case_when(
+                                y1 == y1_hat & y1 == y1_hat ~ "1",
+                                y1 != y1_hat & y1 != y1_hat ~ "3",
+                                TRUE ~ "2"))
+                  )
+
+
+
+plt <- acc_dat %>% 
+        count(accuracy = accuracy) %>% 
+        mutate(pct = prop.table(n)) %>% 
+        ggplot(aes(x = accuracy, y = pct, fill = accuracy, label = scales::percent(pct))) + 
+           geom_col(position = 'dodge') + 
+           geom_text(position = position_dodge(width = .9),    # move to center of bars
+                        vjust = -0.5,    # nudge above top of bar
+                         size = 3) + 
+       labs(y = "Percent", fill="accuracy") +
+       scale_y_continuous(labels = scales::percent) +
+       theme_bw()
+plt
+
+
+
+
+
+```
+
+
+```{r survival_modeling}
+#%%%%%%%%%%%%%%%%%%%%%%%%%%% SURVIVAL MODELING %%%%%%%%%%%%%%%%%%%%%%
+```
 
 
 
