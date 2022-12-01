@@ -31,3 +31,8 @@ we want to find a method to predict:
   - get primary tissue data from TCGA
   - divide patients by whether these patients have metastasis prediction.
   - do survival analysis on the 2 groups.
+
+
+
+# Report Template
+- [Link to Templates](https://www.overleaf.com/gallery/tagged/oup#.Wq-y9WrFLcs)
