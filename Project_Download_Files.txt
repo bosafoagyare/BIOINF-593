@@ -1,0 +1,717 @@
+
+Tutorial sources:
+https://www.bioconductor.org/packages/release/workflows/vignettes/TCGAWorkflow/inst/doc/TCGAWorkflow.html
+
+
+
+
+
+
+
+Loading libraries
+BiocManager::install("GenomicDataCommons")
+install.packages("tidyverse")
+install.packages("magrittr")
+BiocManager::install("TCGAbiolinks")
+```{r}
+library(TCGAbiolinks)
+# library(SummarizedExperiment)
+library(data.table)
+library(GenomicDataCommons)
+library(magrittr)
+library(stringr)
+library("org.Hs.eg.db")
+```
+
+
+
+
+UUID to TCGA IDs
+```{r}
+uuid <- "ffeede9a-d9a9-4836-8c56-39f12a5fde0e"
+TCGAtranslateID = function(file_ids, legacy = FALSE) {
+    info = files(legacy = legacy) %>%
+        filter( ~ file_id %in% file_ids) %>%
+        select('cases.samples.submitter_id') %>%
+        results_all()
+    # The mess of code below is to extract TCGA barcodes
+    # id_list will contain a list (one item for each file_id)
+    # of TCGA barcodes of the form 'TCGA-XX-YYYY-ZZZ'
+    id_list = lapply(info$cases,function(a) {
+        a[[1]][[1]][[1]]})
+    # so we can later expand to a data.frame of the right size
+    barcodes_per_file = sapply(id_list,length)
+    # And build the data.frame
+    return(data.frame(file_id = rep(ids(info),barcodes_per_file),
+                      submitter_id = unlist(id_list)))
+}
+1988/2
+TCGAtranslateID(uuid)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Function to get symbols from ENSL names
+```{r}
+library("org.Hs.eg.db") # remember to install it if you don't have it already
+symbol_names <- function(l){
+  return(mapIds(org.Hs.eg.db, keys = l, keytype = "ENSEMBL", column="SYMBOL"))
+}
+```
+
+
+
+
+
+
+
+
+
+
+GSE110009
+```{r}
+GSE110 <- read.csv("/mctp/users/chualec/HW/BC/GSE110009_metastatic_Colon_TPM.txt", header = T, sep = "\t")
+library(stringr)
+unique(paste(word(names(GSE110), 1, sep = "_"),word(names(GSE110),2,sep="_"),sep="_"))
+```
+
+Colors represent cells that collected from different regions. N, normal region. PT, primary tumor. LM, liver metastasis
+R=region #
+
+remove non primary tumor samples
+```{r}
+GSE110 <- GSE110[!duplicated(GSE110$X),]
+rownames(GSE110) <- GSE110$X
+GSE110 <- GSE110[,grep("PT", names(GSE110))]
+unique(paste(word(names(GSE110), 1, sep = "_"),word(names(GSE110),2,sep="_"),sep="_"))
+```
+
+```{r}
+GSE110 <- data.frame(t(GSE110))
+GSE110.ag <- aggregate(GSE110, by = list(paste(word(rownames(GSE110),1,sep="_"),word(rownames(GSE110),2,sep="_"),sep="_")), FUN=mean)
+rownames(GSE110.ag) <- GSE110.ag$Group.1
+GSE110.ag <- GSE110.ag[,-match("Group.1", names(GSE110.ag))]
+```
+
+# ```{r}
+# rowSums(as.matrix(GSE110.ag))
+# ```
+# It's basically TPM
+
+```{r}
+library(tibble)
+
+GSE110.ag.final <- add_column(GSE110.ag, study = "GSE110009", tissue="Colon",
+           Met_location = c("Liver", "Liver", "None", "LymphNode", "LymphNode", "LymphNode", "LymphNode", "LymphNode", "LymphNode", "Liver", "Liver;LymphNode", "Liver;LymphNode", "Liver;LymphNode", "Liver;LymphNode"), .before = 1)
+write.csv(GSE110.ag.final,"/mctp/users/chualec/HW/BC/Organized/GSE110009.final.csv")
+
+```
+
+
+
+
+
+```{r}
+GSE50760.filenames <- list.files("/mctp/users/chualec/HW/BC/GSE50760/", pattern="*.1_FPKM.txt.gz", full.name=T)
+library(data.table)
+GSE50760.df <- data.frame()
+for(i in GSE50760.filenames){
+  tmp <- read.table(i, header=T)
+  tmp <- tmp[!duplicated(tmp$genes),]
+  if(nrow(GSE50760.df)==0){
+    GSE50760.df <- tmp
+  } else {
+    GSE50760.df <- merge(GSE50760.df, tmp, by = "genes", all.x=T, all.y=T)
+  }
+  
+}
+```
+```{r}
+
+rownames(GSE50760.df) <- GSE50760.df$genes
+GSE50760.df <- GSE50760.df[,-match("genes", names(GSE50760.df))]
+GSE50760.df <- data.frame(t(GSE50760.df))
+GSE50760.df
+
+GSE50760.final <- add_column(GSE50760.df, study = "GSE50760", tissue="Colon",
+           Met_location = c("Liver"), .before = 1)
+GSE50760.final
+
+
+write.csv(GSE50760.final,"/mctp/users/chualec/HW/BC/Organized/GSE50760.final.csv")
+```
+
+
+
+GSE52715
+```{r}
+GSE52715.df <- read.csv("/mctp/users/chualec/HW/BC/GSE52715_singlecellRNAseq_lungCancerStemC_12samples_RPKM(1).csv", header=T)
+GSE52715.df <- GSE52715.df[!duplicated(GSE52715.df$geneSymbol),]
+rownames(GSE52715.df) <- GSE52715.df$geneSymbol
+GSE52715.df <- GSE52715.df[,-match("geneSymbol", names(GSE52715.df))]
+
+GSE52715.df <- data.frame(t(GSE52715.df))
+GSE52715.final <- add_column(GSE52715.df, study = "GSE52715", tissue="Colon",
+           Met_location = c("Liver"), .before = 1)
+```
+
+```{r}
+df <- GSE63124.final
+# fpkm <- function(df){
+df.meta <- df[,1:3]
+df.counts <- df[,4:ncol(df)]
+df.counts
+# }https://www.biostars.org/p/171766/
+```
+GSE63124
+
+```{R}
+GSE63124.df <- read.csv("/mctp/users/chualec/HW/BC/GSE63124_all_gene_raw_readcounts2.txt", sep = "\t")
+
+
+library("org.Hs.eg.db") # remember to install it if you don't have it already
+symbols <- mapIds(org.Hs.eg.db, keys = GSE63124.df$Gene, keytype = "ENSEMBL", column="SYMBOL")
+GSE63124.df$Gene <- symbols
+GSE63124.df <- GSE63124.df[!duplicated(GSE63124.df$Gene),]
+
+
+GSE63124.df <- GSE63124.df[!is.na(GSE63124.df$Gene),]
+rownames(GSE63124.df) <- GSE63124.df$Gene
+GSE63124.df <- GSE63124.df[,-match("Gene", names(GSE63124.df))]
+GSE63124.df <- GSE63124.df[,grep("Pr", names(GSE63124.df))]
+GSE63124.df <- data.frame(t(GSE63124.df))
+
+GSE63124.final <- add_column(GSE63124.df, study = "GSE63124", tissue="Pancreas",
+           Met_location = c("Lung"), .before = 1)
+
+GSE63124.final
+
+
+
+write.csv(GSE63124.final,"/mctp/users/chualec/HW/BC/Organized/GSE63124.final.csv")
+```
+
+
+
+GSE98394
+```{r}
+
+```
+
+GSE77509
+```{r}
+# GSE77509.df <- read.csv("/mctp/users/chualec/HW/BC/GSE77509/")
+
+```
+```{r}
+GSE77509.filenames <- list.files("/mctp/users/chualec/HW/BC/GSE77509/", pattern="[P]", full.name=T)
+GSE77509.filenames
+library(data.table)
+GSE77509.df <- data.frame()
+for(i in GSE77509.filenames){
+  tmp <- read.table(i, header=T)
+  tmp <- tmp[!duplicated(tmp$ID),]
+  if(nrow(GSE77509.df)==0){
+    GSE77509.df <- tmp
+  } else {
+    GSE77509.df <- merge(GSE77509.df, tmp, by = "ID", all.x=T, all.y=T)
+  }
+  
+}
+
+GSE77509.df
+
+library("org.Hs.eg.db") # remember to install it if you don't have it already
+symbols <- mapIds(org.Hs.eg.db, keys = GSE77509.df$ID, keytype = "ENSEMBL", column="SYMBOL")
+GSE77509.df$ID <- symbols
+GSE77509.df <- GSE77509.df[!duplicated(GSE77509.df$ID),]
+GSE77509.df <- GSE77509.df[!is.na(GSE77509.df$ID),]
+rownames(GSE77509.df) <- GSE77509.df$ID
+GSE77509.df <- GSE77509.df[,-match("ID", names(GSE77509.df))]
+names(GSE77509.df) <- paste0("GSE77509.df", 1:ncol(GSE77509.df))
+GSE77509.df <- data.frame(t(GSE77509.df))
+
+range(rowSums(GSE77509.df))
+
+GSE77509.final <- add_column(GSE77509.df, study = "GSE77509", tissue="Liver",
+           Met_location = c("PortalVein"), .before = 1)
+
+GSE77509.final
+write.csv(GSE77509.final,"/mctp/users/chualec/HW/BC/Organized/GSE77509.final.csv")
+```
+
+
+
+GSE143897
+RNA expression of ovarian cancer primary and post treatment
+Unsure if met or not...
+```{r}
+
+```
+
+
+GSE158631
+we performed single-cell level analysis on three gastric cancer patients with primary cancer and paired metastatic lymph node cancer tissues using scRNA-seq
+TT vs LN
+```{r}
+GSE158631.df <- read.csv("/mctp/users/chualec/HW/BC/GSE158631_count.csv", sep = ",")
+rownames(GSE158631.df) <- GSE158631.df$X
+GSE158631.df <- GSE158631.df[,grep("TT", names(GSE158631.df))]
+GSE158631.df <- data.frame(t(GSE158631.df))
+
+GSE158631.final <- add_column(GSE158631.df, study = "GSE158631", tissue="Gastric",
+           Met_location = c("LymphNode"), .before = 1)
+
+write.csv(GSE158631.final,"/mctp/users/chualec/HW/BC/Organized/GSE158631.final.csv")
+```
+
+
+GSE198291
+Identification of RAC1 in Promoting Brain Metastasis of Lung Adenocarcinoma using Single-cell Transcriptome Sequencing
+ScRNA-seq data analysis of 8 patients who either donated primary tumor biopsy, metastasis tumor tissue, para-metastasis tissue, CTCs from blood, or all of the tissues
+PT1 = patient 1
+MTT = met tissue?
+PTT = primary tissue?
+CTT= control tissue?
+patients with both M and P:
+PT1, PT4
+```{r}
+GSE198291.df <- read.csv("/mctp/users/chualec/HW/BC/GSE198291_allcounts2.csv")
+names(GSE198291.df)
+table(substr(names(GSE198291.df),start = 1,stop = 5))
+rownames(GSE198291.df) <- GSE198291.df$X
+GSE198291.df <- GSE198291.df[,c(grep("PT1_P", names(GSE198291.df)),grep("PT4_P", names(GSE198291.df)))]
+GSE198291.df <- data.frame(t(GSE198291.df))
+
+GSE198291.final <- add_column(GSE198291.df, study = "GSE198291", tissue="Lung",
+           Met_location = c("Brain"), .before = 1)
+
+write.csv(GSE198291.final,"/mctp/users/chualec/HW/BC/Organized/GSE198291.final.csv")
+```
+
+GSE162960
+ 	Two conditions of rectal cancer patient (I+II) data separates by the event of distant metastasis: 1. good prognosis, no event (3 samples), 2. bad prognosis, event (8 samples); remaining patients are categorized as bad prognosis, event (43 samples).
+```{r}
+GSE162960.df <- read.csv("/mctp/users/chualec/HW/BC/GSE162960_RSEM_counts.csv")
+GSE162960.df$genes <- symbol_names(GSE162960.df$X)
+GSE162960.df <- GSE162960.df[,-match("X", names(GSE162960.df))]
+GSE162960.df <- GSE162960.df[!duplicated(GSE162960.df$genes),]
+GSE162960.df <- GSE162960.df[!is.na(GSE162960.df$genes),]
+rownames(GSE162960.df) <- GSE162960.df$genes
+
+GSE162960.df <- GSE162960.df[,7:ncol(GSE162960.df)]
+
+GSE162960.df <- data.frame(t(GSE162960.df))
+GSE162960.final <- add_column(GSE162960.df, study = "GSE162960", tissue="Colon",
+           Met_location = c("Liver"), .before = 1)
+
+write.csv(GSE162960.final,"/mctp/users/chualec/HW/BC/Organized/GSE162960.final.csv")
+```
+
+
+GSE183202
+ 	We present a comprehensive molecular characterization of a cohort of 52 patients with peritoneal metastasis
+ 	 	Comparasion of primary colorectal cancers versus peritoneal metastasis
+```{r}
+GSE183202.df <- read.csv("/mctp/users/chualec/HW/BC/GSE183202_count_raw.txt", sep ="\t")
+# GSE183202.df$genes <- symbol_names(GSE183202.df$X)
+# GSE183202.df <- GSE183202.df[,-match("X", names(GSE183202.df))]
+# GSE183202.df <- GSE183202.df[!duplicated(GSE183202.df$genes),]
+# GSE183202.df <- GSE183202.df[!is.na(GSE183202.df$genes),]
+# rownames(GSE183202.df) <- GSE183202.df$genes
+
+GSE183202.df <- data.frame(t(GSE183202.df))
+GSE183202.final <- add_column(GSE183202.df, study = "GSE183202", tissue="Colon",
+           Met_location = c("Peritoneal"), .before = 1)
+
+write.csv(GSE183202.final,"/mctp/users/chualec/HW/BC/Organized/GSE183202.final.csv")
+```
+
+GSE18549
+Ninety-six laser capture microdissected adenocarcinoma patient tumor samples of various primary and metastatic sites were processed for Total RNA. Our 96-sample datatset was enriched by inclusion of previously deposited microarray data in GEO (reprocessed for this study):
+A total of 1217 samples (1104 samples from GSE2109, 113 samples from GSE12630) were reprocessed from the CEL files using RMA.
+Supplementary files:
+A list of the 1217 Samples' GSM accession numbers and the corresponding reprocessed sample IDs.
+
+This is microarray data, will clean later
+```{r}
+GSE18549.df <- read.csv("/mctp/users/chualec/HW/BC/GSE18549_GSMs-from-GSE12630_reprocessed_RMA.txt", sep ="\t")
+# GSE18549.df$genes <- symbol_names(GSE18549.df$X)
+# GSE18549.df <- GSE18549.df[,-match("X", names(GSE18549.df))]
+# GSE18549.df <- GSE18549.df[!duplicated(GSE18549.df$genes),]
+# GSE18549.df <- GSE18549.df[!is.na(GSE18549.df$genes),]
+# rownames(GSE18549.df) <- GSE18549.df$genes
+names(GSE18549.df)
+GSE18549.df <- data.frame(t(GSE18549.df))
+GSE18549.final <- add_column(GSE18549.df, study = "GSE18549", tissue="Colon",
+           Met_location = c("Peritoneal"), .before = 1)
+
+write.csv(GSE18549.final,"/mctp/users/chualec/HW/BC/Organized/GSE18549.final.csv")
+```
+
+
+
+GSE125989
+ 	Sixteen paired matched samples from primary breast cancers and brain metastases diagnosed between April 1, 2001 and December 31, 2012 were collected from 8 institutions. Brain metastases were identified based on magnetic resonance imaging and/or computed tomography findings. The clinical characteristics of all the patients were obtained from their medical records. This study was approved by the institutional review board of each participating institute (Tokai University School of Medicine; National Hospital Organization Osaka National Hospital; Kinki University School of Medicine; Niigata Cancer Center Hospital; Shizuoka General Hospital; Hokkaido Cancer Center; National Hospital Organization, Tokyo Medical Center; and Gunma Prefectural Cancer Center). Matching primary breast cancers and brain metastases Formalin-Fixed Paraffin-Embedded (FFPE) specimens for gene expression analysis were collected into RNA. RNA from specimens was isolated, and quantity and quality of the each RNA was using an Agilent 2100 Bioanalyzer (Agilent Technologies). Genome-wide expression levels of transcripts were analyzed using the Affymetrix U133A gene chips (Affymetrix) according to the manufacture’s instructions.
+  	
+Overall design 	Retrospective study: Matching primary breast cancers and brain metastases from 16 patients.
+
+```{r}
+GSE125989.filenames <- list.files("/mctp/users/chualec/HW/BC/GSE125989/", full.name=T)
+GSE125989.filenames
+library(data.table)
+library(affy)
+GSE125989.df <- data.frame()
+# for(i in GSE125989.filenames){
+test <- ReadAffy("/mctp/users/chualec/HW/BC/GSE125989/GSM3587382_EA1690_02.CEL.gz")
+test
+
+
+
+tmp <- read.table(i, header=T) #.gz
+  tmp <- tmp[!duplicated(tmp$ID),]
+  if(nrow(GSE125989.df)==0){
+    GSE125989.df <- tmp
+  } else {
+    GSE125989.df <- merge(GSE125989.df, tmp, by = "ID", all.x=T, all.y=T)
+  }
+  
+# }
+```
+Some sort of weird CEL expression array
+
+
+
+
+
+
+
+
+GSE180186
+ 	This data set consists of immune-related gene expression profiles of 35 primary tumors and 11 matched lymph node metastases, derived from 35 breast cancer patients treated at Medical University of Gdańsk, Poland, between 2010 and 2013. Total RNA was extracted from FFPE material, pre-amplified using nCounter Low RNA Input Kit and subsequently analyzed using NanoString nCounter System (NanoString Technologies) and dedicated PanCancer Immune Profiling Panel.
+ 	
+ 
+```{r}
+GSE180186.filenames <- list.files("/mctp/users/chualec/HW/BC/GSE180186/", full.name=T)
+
+GSE180186.df <- data.frame()
+for(i in GSE180186.filenames){
+tmp <- read.table(i, skip=26, header=T)
+library(stringr)
+tmp$CodeClass <- word(tmp$CodeClass.Name.Accession.Count,1,sep=",")
+tmp$Name <- word(tmp$CodeClass.Name.Accession.Count,2,sep=",")
+tmp$Accession <- word(tmp$CodeClass.Name.Accession.Count,3,sep=",")
+tmp$Count <- word(tmp$CodeClass.Name.Accession.Count,4,sep=",")
+tmp <- tmp[1:(nrow(tmp)-3),]
+tmp <- tmp[!duplicated(tmp$Name),]
+tmp <- data.frame(Name=tmp$Name, Count=tmp$Count)
+names(tmp) <- c("Name", word(word(i, 9, sep = "/"),1,sep="[.]"))
+if(nrow(GSE180186.df)==0){
+  GSE180186.df <- tmp
+} else {
+  GSE180186.df <- merge(GSE180186.df, tmp, by = "Name", all.x=T, all.y=T)
+}
+  
+}
+GSE180186.df <- GSE180186.df[!is.na(GSE180186.df$Name),]
+rownames(GSE180186.df) <- GSE180186.df$Name
+GSE180186.df <- GSE180186.df[,-match("Name", names(GSE180186.df))]
+GSE180186.df
+GSE180186.df <- data.frame(t(GSE180186.df))
+library(tibble)
+tmp <- data.frame(t(apply(GSE180186.df, 1, function(x)(1000000*as.numeric(x)/sum(as.numeric(x))))))
+names(tmp) <- names(GSE180186.df)
+GSE180186.final <- add_column(tmp, study = "GSE180186", tissue="Breast",
+           Met_location = c("LymphNode"), .before = 1)
+
+#which ones have match?
+tmp <- c()
+for(i in word(rownames(GSE180186.final),2,sep="_")){
+  tmp <- c(tmp, substr(i, 1, nchar(i)-1))
+}
+tmp <- data.frame(table(tmp))
+
+tmp <- tmp[tmp$Freq >1,]
+
+GSE180186.final <- GSE180186.final[word(rownames(GSE180186.final),2,sep="_") %in% paste0(tmp$tmp, "C"),]
+
+write.csv(GSE180186.final,"/mctp/users/chualec/HW/BC/Organized/GSE180186.final.csv")
+```
+ 	
+ 	
+ 	
+ 	
+
+GSE92977
+Intrinsic subtype and gene expression changes between matched primary and metastatic samples of breast cancer patients
+Summary 	We compared expression of 105 breast cancer-related genes between matched primary and metastatic breast cancer
+Overall design 	The analysis was performed on 246 (123 pairs) formalin-fixed paraffin-embedded tumor tissue using the nCounter platform
+
+
+```{r}
+GSE92977.filenames <- read.csv("/mctp/users/chualec/HW/BC/GSE92977_raw_data.txt", sep = "\t")
+rownames(GSE92977.filenames) <- GSE92977.filenames$Gene.Name
+GSE92977.filenames <- GSE92977.filenames[,grepl("P", names(GSE92977.filenames))]
+GSE92977.filenames
+
+GSE92977.df <- data.frame(t(GSE92977.filenames))
+
+tmp <- data.frame(t(apply(GSE92977.df, 1, function(x)(1000000*as.numeric(x)/sum(as.numeric(x))))))
+names(tmp) <- names(GSE92977.df)
+GSE92977.df <- tmp
+library(tibble)
+library(htm2txt)
+#GSM2441087~GSM2441331 	
+
+
+tmp <- c()
+for(i in seq(2441087, 2441331,by=2)){
+url <- paste0("https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM",i)
+text <- gettxt(url)
+
+text <- strsplit(text, split="\n")[[1]]
+text <- text[grepl("metastatic site:", text)]
+text <- word(text, 2, sep = ":")
+text <- gsub(text,pattern =  " ",replacement =  "")
+tmp <- c(tmp,text)
+}
+tmp[grep("lymphnode", tmp, ignore.case=T)] <- "LymphNodes"
+
+GSE92977.final <- add_column(GSE92977.df, study = "GSE92977", tissue="Breast",
+           Met_location = tmp, .before = 1)
+
+write.csv(GSE92977.final,"/mctp/users/chualec/HW/BC/Organized/GSE92977.final.csv")
+
+```
+
+
+
+
+
+
+
+
+
+
+```{r}
+concat_TCGA <- function(file_path,tissue, met = "None"){
+tcga.files <- list.files(file_path)
+tcga.df <- data.frame()
+for(i in 1:length(tcga.files)){
+  tmp <- read.csv(list.files(paste0(file_path, tcga.files[i],"/"), pattern="tsv", full.names=T), header=F, sep = "\t", skip=6)
+  names(tmp) <- c("ENSL", "gene", "gene_type", "unstranded", "stranded_first", "stranded_second", "tpm_unstranded", "fpkm_unstranded", "fpkm_uq_unstranded")
+  tmp <- tmp[tmp$gene_type == "protein_coding",]
+  tmp <- tmp[,match(c("gene", "tpm_unstranded"), names(tmp))]
+  tmp <- aggregate(tmp$tpm_unstranded, by=list(tmp$gene), FUN=sum)
+  names(tmp) <- c("gene", tcga.files[i])
+  if(nrow(tcga.df)==0){
+    tcga.df <- tmp
+  } else {
+    tcga.df <- merge(tcga.df, tmp, by = "gene", all.x=T, all.y=T)
+  }
+}
+
+rownames(tcga.df) <- tcga.df$gene
+tcga.df <- tcga.df[,-match("gene", names(tcga.df))]
+library(tibble)
+tcga.df<-data.frame(t(tcga.df))
+tcga.df.final <- add_column(tcga.df, study = "tcga", tissue=tissue,
+           Met_location = met, .before = 1)
+if(met == "None"){
+  write.csv(tcga.df.final,paste0("/mctp/users/chualec/HW/BC/Organized/tcga.",tissue,".final.csv"))
+} else {
+  write.csv(tcga.df.final,paste0("/mctp/users/chualec/HW/BC/Organized/tcga.",tissue,".m1.final.csv"))
+}
+
+return(tcga.df.final)
+}
+```
+
+GDC (TCGA) m0s
+
+(takes like 1.5 hrs to run...)
+```{r}
+tcga.pancreas.df.final <- concat_TCGA("/mctp/users/chualec/HW/BC/GDC_m0_pancreas/Raw/", "Pancreas")
+tcga.liver.df.final <- concat_TCGA("/mctp/users/chualec/HW/BC/GDC_m0_liver/Raw/", "Liver")
+tcga.skin.df.final <- concat_TCGA("/mctp/users/chualec/HW/BC/GDC_m0_skin/Raw/", "Skin")
+tcga.lung.df.final <- concat_TCGA("/mctp/users/chualec/HW/BC/GDC_m0_lung/Raw/", "Lung")
+tcga.kidney.df.final <- concat_TCGA("/mctp/users/chualec/HW/BC/GDC_m0_kidney/Raw/", "Kidney")
+tcga.colon.df.final <- concat_TCGA("/mctp/users/chualec/HW/BC/GDC_m0_colon/Raw/", "Colon")
+tcga.breast.df.final <- concat_TCGA("/mctp/users/chualec/HW/BC/GDC_m0_breast/Raw/", "Breast")
+tcga.gastric.df.final <- concat_TCGA("/mctp/users/chualec/HW/BC/GDC_m0_gastric/Raw/", "Gastric")
+
+```
+
+
+
+GDC m1s
+```{r}
+tcga.pancreas.df.m1.final <- concat_TCGA("/mctp/users/chualec/HW/BC/GDC_m1_pancreas/Raw/", "Pancreas", met = "Yes")
+tcga.skin.df.m1.final <- concat_TCGA("/mctp/users/chualec/HW/BC/GDC_m1_skin/Raw/", "Skin", met = "Yes")
+tcga.lung.df.m1.final <- concat_TCGA("/mctp/users/chualec/HW/BC/GDC_m1_lung/Raw/", "Lung", met = "Yes")
+tcga.kidney.df.m1.final <- concat_TCGA("/mctp/users/chualec/HW/BC/GDC_m1_kidney/Raw/", "Kidney", met = "Yes")
+tcga.colon.df.m1.final <- concat_TCGA("/mctp/users/chualec/HW/BC/GDC_m1_colon/Raw/", "Colon", met = "Yes")
+tcga.breast.df.m1.final <- concat_TCGA("/mctp/users/chualec/HW/BC/GDC_m1_breast/Raw/", "Breast", met = "Yes")
+tcga.gastric.df.m1.final <- concat_TCGA("/mctp/users/chualec/HW/BC/GDC_m1_gastric/Raw/", "Gastric", met = "Yes")
+```
+
+
+
+
+
+```{r}
+tcga_genes <- unique(c(names(tcga.breast.df.final), names(tcga.colon.df.final), names(tcga.kidney.df.final), names(tcga.skin.df.final), names(tcga.lung.df.final), names(tcga.pancreas.df.final),
+                       names(tcga.gastric.df.final),
+                       names(tcga.liver.df.final),
+                       names(tcga.pancreas.df.m1.final),
+                       names(tcga.skin.df.m1.final),
+                       names(tcga.lung.df.m1.final),
+                       names(tcga.kidney.df.m1.final),
+                       names(tcga.colon.df.m1.final),
+                       names(tcga.breast.df.m1.final),
+                       names(tcga.gastric.df.m1.final)))
+# tcga_genes <- tcga_genes[-match(c("study", "tissue", "Met_location"), tcga_genes)]
+length(tcga_genes)
+```
+
+
+```{r}
+complete.df <- data.frame(row.names=tcga_genes, gene=tcga_genes)
+file_path <- "/mctp/users/chualec/HW/BC/Organized/"
+tmp.files <- list.files(file_path)
+filesi <- tmp.files[1]
+for(filesi in tmp.files){
+  tmp <- read.csv(paste0(file_path, filesi), header=T, sep = ",",row.names = 1)
+  tmp <- data.frame(t(tmp))
+  tmp <- tmp[match(complete.df$gene, rownames(tmp)),]
+  complete.df <- cbind(complete.df, tmp)
+  
+}
+complete.df <- complete.df[,-match("gene", names(complete.df))]
+complete.df <- data.frame(t(complete.df))
+complete.df$Met_location[complete.df$Met_location=="Liver;LymphNode"] <- "Liver"
+complete.df$Met_location[complete.df$Met_location=="Endometrial"] <- "Ovarian"
+complete.df$Met_location[complete.df$Met_location=="Pleura"] <- "Lung"
+complete.df$Met_location[complete.df$Met_location=="LymphNodes"] <- "LymphNode"
+complete.df$Met_location[complete.df$Met_location=="Bowel"] <- "Colon"
+table(From = complete.df$tissue, To = complete.df$Met_location)
+```
+
+```{r}
+write.csv(complete.df, file="/mctp/users/chualec/HW/20221129_Full_Dataset.csv")
+```
+
+
+
+```{r}
+# complete.df <- data.frame(row.names=tcga_genes, gene=tcga_genes)
+# #list of all datasets
+# for(df in list(tcga.breast.df.final,tcga.colon.df.final,tcga.kidney.df.final,tcga.skin.df.final,tcga.lung.df.final,tcga.gastric.df.final,tcga.liver.df.final,tcga.pancreas.df.final,
+#                GSE110.ag.final,GSE50760.final,GSE52715.final,GSE63124.final,GSE77509.final,GSE158631.final,GSE198291.df,GSE162960.final,GSE183202.final,GSE180186.final,GSE92977.final)){
+# 
+#   if(dim(df)[1] < dim(df)[2]){
+#     df <- data.frame(t(df))
+#   }
+#   
+#   df <- df[rownames(df) %in% tcga_genes,]
+#   df <- df[,1:min(ncol(df), 40)]
+#   df$gene <- rownames(df)
+#   
+#   complete.df <- merge(complete.df, df, by="gene", all.x=T, all.y=T)
+#   
+# 
+# }
+# 
+# 
+# rownames(complete.df) <- complete.df$gene
+# complete.df.filter <- complete.df[,-match("gene", names(complete.df))]
+# complete.df.filter <- data.frame(t(complete.df.filter))
+# # df.order <- match(names(complete.df.filter)[names(complete.df.filter) %in% c("study", "tissue", "Met_location")], names(complete.df.filter))
+# 
+# complete.df.filter <- add_column(complete.df.filter,study_source = complete.df.filter$study, tissue_source=complete.df.filter$tissue,
+#            met_location = complete.df.filter$Met_location, .before = 1)
+# 
+# complete.df.filter <- complete.df.filter[,-match(c("study", "tissue", "Met_location"),names(complete.df.filter))]
+# 
+# table(from = complete.df.filter$tissue_source, to=complete.df.filter$met_location)
+```
+
+
+
+
+translate to tpm
+```{r}
+# # complete.df.filter <- data.frame(t(complete.df.filter))
+# # complete.df.filter[is.na(complete.df.filter)] <- 0
+# # complete.df.filter.values <- complete.df.filter[4:nrow(complete.df.filter),]
+# # complete.df.filter.values <- data.frame(lapply(complete.df.filter.values,as.numeric))
+# # colSums(as.matrix(complete.df.filter.values))
+# tmp <- complete.df.filter[4:ncol(complete.df.filter)]
+# tmp2 <- data.frame(sapply(tmp, as.numeric))
+# 
+# tmp2[is.na(tmp2)] <- 0
+# tmp2<-data.frame((prop.table(as.matrix(tmp2),1)*1000000))
+# tmp2
+# 
+# tmp3 <- complete.df.filter
+# tmp3[4:ncol(tmp3)]<-tmp2
+# 
+# tmp3
+```
+
+
+```{r}
+write.csv(tmp3, "/mctp/users/chualec/HW/BC/Organized/test.data.csv",quote = F)
+```
+
+
+
+
+
+
+
+
+
+
+
+
