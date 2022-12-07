@@ -9,6 +9,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% LOAD LIBRARIES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 suppressMessages(library(tidyverse))
+suppressMessages(library(broom))
 suppressMessages(library(data.table))
 suppressMessages(library(e1071))
 suppressMessages(library(glmnet))
@@ -30,12 +31,20 @@ glmnet.control(itrace = 1)
 
 ```{r read_data}
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% READ DATA %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-dat <- fread(file = "../../Project_data/20221122_test.data.csv") %>%
-              mutate(study_source = as.factor(study_source),
+dat <- fread(file = "../../Project_data/20221201_Full_Dataset.csv")
+
+dat1 <- dat ## make a copy
+#dat<- dat1 ## resetting
+dat <- dat  %>%
+          rename(study_source = study,
+                 met_location = Met_location,
+                 tissue_source = tissue) %>%
+          mutate(study_source = as.factor(study_source),
                      tissue_source = as.factor(tissue_source),
                      met_location = as.factor(met_location),
                      has_met = as.factor(ifelse(met_location == "None", "No", "Yes"))
                      )
+
 ```
 
 
@@ -45,6 +54,7 @@ dat <- fread(file = "../../Project_data/20221122_test.data.csv") %>%
 #view(slice_dat)
 #slice_dat %>% str
 
+#dat %>% filter(is.na(met_location)) %>% dim
 
 #--------------------------------- Pre-Processing ----------------------
 # Set aside variables not yet needed
@@ -52,7 +62,14 @@ cancer_dat <- dat %>%
                filter(!is.na(tissue_source) & !is.na(met_location)) %>%
                dplyr::select(-c(V1, study_source)) #%>%
               #mutate(id = row_number(), .before = names(.)[1])
-
+grp_by_tissue     <- cancer_dat %>%
+                      group_by(tissue_source) %>%
+                      summarise(n = n()) %>%
+                      mutate(prop = n / sum(n))
+grp_by_metastasis <- cancer_dat %>%
+                      group_by(has_met) %>%
+                      summarise(n = n())%>%
+                      mutate(prop = n / sum(n))
 #xx <- makeX(cancer_dat[, 1:10000], na.impute = TRUE, sparse = TRUE)
                
 
@@ -66,14 +83,20 @@ test  <- rsample::testing(split)
 
 # Create & standardize feature sets based on training parameters
 # training features
-train_x <- train %>% dplyr::select(-c(tissue_source, met_location, has_met))
+train_x <- train %>% 
+            dplyr::select(-c(tissue_source, met_location, has_met)) 
+#train_x[is.na(train_x)] <- 0
+# train_x <- train_x %>%
+#            mutate_if(is.character,as.numeric)
 mean    <- colMeans(train_x)
 std     <- apply(train_x, 2, sd)
 train_x <- scale(train_x, center = mean, scale = std)
 train_y <- train %>% .[["tissue_source"]]
 
 # testing features
-test_x <- test %>% dplyr::select(-c(tissue_source, met_location, has_met))
+test_x <- test %>% 
+          dplyr::select(-c(tissue_source, met_location, has_met))
+#test_x[is.na(test_x)] <- 0
 test_x <- scale(test_x, center = mean, scale = std)
 test_y <- test %>% .[["tissue_source"]]
 
@@ -98,12 +121,13 @@ vfilter <- function(q = 0.3, ...) {
 
 
 #-------------------------------- MISSINGNESS
-response_nas <- filter(dat, is.na(tissue_source) | is.na(met_location))
-nas    <- sapply(train_x, function(x) sum(is.na(x)))
-na_col <- apply(train_x, 2, function(x) anyNA(x))
-na_col_id <- which(na_col)
-#sum(nas)
-#nas
+# response_nas <- filter(dat, is.na(tissue_source) | is.na(met_location))
+# nas    <- sapply(train_x, function(x) sum(is.na(x)))
+# na_col <- apply(train_x, 2, function(x) anyNA(x))
+# na_col_id <- which(na_col)
+# sum(nas)
+# nas
+# str(train_x)
 ```
 
 
@@ -112,61 +136,90 @@ na_col_id <- which(na_col)
 ```
 
 
-```{r modeling_1}
+```{r modeling_1, cache=TRUE}
 #%%%%%%%%%%%%%%%%%%%%%%%%%%% MODEL 1 (E-NET) %%%%%%%%%%%%%%%%%%%%%%
 foldid <- sample(rep(1:10, length.out = length(train_y)))
 
-#-------------------- Model 1
+#------------------- search across a range of alphas
+tuning_grid <- tibble::tibble(
+  alpha      = seq(0, 1, by = .1),
+  mse_min    = NA,
+  mse_1se    = NA,
+  lambda_min = NA,
+  lambda_1se = NA
+)
+
+
+for(i in seq_along(tuning_grid$alpha)) {
+  
+  # fit CV model for each alpha value
+  cvfit.filt1 <- cv.glmnet(x = train_x,
+                         y = train_y,
+                         family = "multinomial",
+                         foldid = foldid, 
+                         standardize = FALSE,
+                         parallel = TRUE,
+                         alpha = tuning_grid$alpha[i]
+                         )
+  
+  # extract MSE and lambda values
+  tuning_grid$mse_min[i]    <- cvfit.filt1$cvm[cvfit.filt1$lambda == cvfit.filt1$lambda.min]
+  tuning_grid$mse_1se[i]    <- cvfit.filt1$cvm[cvfit.filt1$lambda == cvfit.filt1$lambda.1se]
+  tuning_grid$lambda_min[i] <- cvfit.filt1$lambda.min
+  tuning_grid$lambda_1se[i] <- cvfit.filt1$lambda.1se
+}
+```
+
+
+```{r compare, cache=TRUE}
+#tuning_grid
+tuning_grid %>%
+  mutate(se = mse_1se - mse_min) %>%
+  ggplot(aes(alpha, mse_min)) +
+  geom_line(size = 2) +
+  geom_ribbon(aes(ymax = mse_min + se, ymin = mse_min - se), alpha = .25) +
+  ggtitle("") +
+  labs(x = expression(alpha), y = "minimum deviance")+
+  scale_x_continuous(breaks=seq(0,1,0.1)) +
+  theme_classic()
+```
+
+```{r best_model_1}
+
+#-------------------- Final Model 1
 cvfit.filt1 <- cv.glmnet(x = train_x,
                          y = train_y,
                          family = "multinomial",
-                         foldid = foldid, 
+                         foldid = foldid,
                          standardize = FALSE,
                          parallel = TRUE,
-                         alpha = 0
+                         alpha = 0.4
                          )
-#-------------------- Model 2
-cvfit.filt2 <- cv.glmnet(x = train_x,
-                         y = train_y,
-                         family = "multinomial",
-                         foldid = foldid, 
-                         exclude = vfilter(q = 0.3),
-                         standardize = FALSE,
-                         parallel = TRUE,
-                         alpha = 0
-                         )
-
-# #-------------------- Model 3
-# cvfit.filt3 <- cv.glmnet(x = train_x[, -c(na_col_id)],
-#                          y = train_y,
-#                          family = "multinomial",
-#                          foldid = foldid, 
-#                          standardize = FALSE
-#                          )
-# 
-# #-------------------- Model 4
-# cvfit.filt4 <- cv.glmnet(x = train_x[, -c(na_col_id)],
-#                          y = train_y,
-#                          family = "multinomial",
-#                          foldid = foldid, 
-#                          exclude = vfilter(q = 0.3),
-#                          standardize = FALSE
-#                          )
 
 
 #---------------------- Performance
 assess.glmnet(cvfit.filt1, newx = test_x, newy = test_y)$class
-assess.glmnet(cvfit.filt2, newx = test_x, newy = test_y)$class
-assess.glmnet(cvfit.filt3, newx = test_x, newy = test_y)$class
 
-confusion.glmnet(cvfit.filt1, newx = test_x, newy = test_y)
-confusion.glmnet(cvfit.filt2, newx = test_x, newy = test_y)
-#confusion.glmnet(cvfit.filt3, newx = test_x[, -c(na_col_id)], newy = test_y)
-#confusion.glmnet(cvfit.filt4, newx = test_x[, -c(na_col_id)], newy = test_y)
+confusion.glmnet(cvfit.filt1, newx = test_x, newy = test_y)%>%
+  xtable::xtable(align = c(rep("c", 9)),
+                 label = "", caption = "")
+```
 
+```{r predict, cache=TRUE}
 #-------------------- Prediction
 test_y_hat  <- predict(cvfit.filt1, newx = test_x, type = "class", s = "lambda.min")
 train_y_hat <- predict(cvfit.filt1, newx = train_x, type = "class", s = "lambda.min")
+
+#-------------------- Top Influential Variables
+# coef(cvfit.filt1, s = "lambda.1se")$Breast %>%
+#   tidy() %>%
+#   filter(row != "(Intercept)") %>%
+#   top_n(25, wt = abs(value)) %>%
+#   ggplot(aes(value, reorder(row, value))) +
+#   geom_point() +
+#   ggtitle("Top 25 influential variables") +
+#   xlab("Coefficient") +
+#   ylab(NULL)
 ```
 
 
@@ -205,7 +258,9 @@ cvfit.mod_set2 <- cv.glmnet(x = train_x2,
 #---------------------- Performance
 assess.glmnet(cvfit.mod_set2, newx = test_x2, newy = test_y2)$class
 
-confusion.glmnet(cvfit.mod_set2, newx = test_x2, newy = test_y2)
+confusion.glmnet(cvfit.mod_set2, newx = test_x2, newy = test_y2) %>%
+  xtable::xtable(align = c("l", "c", "c"),
+                 label = "", caption = "")
 
 #-------------------- Prediction
 test_y_hat_2 <- predict(cvfit.mod_set2, newx = test_x2, type = "class", s = "lambda.min")
@@ -220,9 +275,9 @@ acc_dat <- data.frame(y1 = test_y,
                       y2 = test_y2,
                       y2_hat = as.factor(test_y_hat_2)) %>%
            mutate(accuracy = factor(case_when(
-                                y1 == y1_hat & y1 == y1_hat ~ "1",
-                                y1 != y1_hat & y1 != y1_hat ~ "3",
-                                TRUE ~ "2"))
+                                y1 == y1_hat & y1 == y1_hat ~ "accurate",
+                                y1 != y1_hat & y1 != y1_hat ~ "inaccurate",
+                                TRUE ~ "semi-accurate"))
                   )
 
 
@@ -237,13 +292,25 @@ plt <- acc_dat %>%
                          size = 3) + 
        labs(y = "Percent", fill="accuracy") +
        scale_y_continuous(labels = scales::percent) +
-       theme_bw()
+       theme_classic()
 plt
 
 
 
 
-
+#-------------------- Top Influential Variables
+coef(cvfit.mod_set2, s = "lambda.1se") %>%
+  as.matrix() %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "rowname") %>%
+  rename(value = s1) %>%
+  filter(rowname != "(Intercept)") %>%
+  top_n(25, wt = abs(value)) %>%
+  ggplot(aes(value, reorder(rowname, value), color = value > 0)) +
+  geom_point() +
+  ggtitle("Top 25 influential genes") +
+  xlab("Coefficient") +
+  ylab(NULL) + theme_bw()
 ```
 
 
